@@ -36,7 +36,12 @@ from specforge.data import (
     prepare_dp_dataloaders,
 )
 from specforge.data.utils import DataCollatorWithPadding
-from specforge.distributed import destroy_distributed, get_dp_group, init_distributed
+from specforge.distributed import (
+    destroy_distributed,
+    get_dp_group,
+    get_tp_group,
+    init_distributed,
+)
 from specforge.modeling.target.sgl_model_wrapper import SglangTargetModel
 from specforge.modeling.target.target_head import TargetHead
 from specforge.optimizer import BF16Optimizer
@@ -274,9 +279,9 @@ class SglOnlineEagle3Trainer:
         assert (
             args.draft_micro_batch_size == 1
         ), "draft_micro_batch_size must be 1 for SglOnlineEagle3Trainer"
-        assert (
-            args.tp_size == dist.get_world_size()
-        ), "tp_size must be equal to world_size for SglOnlineEagle3Trainer"
+        # assert (
+        #     args.tp_size == dist.get_world_size()
+        # ), "tp_size must be equal to world_size for SglOnlineEagle3Trainer"
         self.draft_model_config = AutoDraftModelConfig.from_file(
             self.args.draft_model_config
         )
@@ -348,7 +353,7 @@ class SglOnlineEagle3Trainer:
             args=self.args,
             target_micro_batch_size=self.args.target_micro_batch_size,
             draft_micro_batch_size=self.args.draft_micro_batch_size,
-            tp_group=dist.group.WORLD,
+            tp_group=get_tp_group(),
             enable_aux_hidden_states=True,
             return_full_logits=False,
         )
@@ -496,7 +501,7 @@ class SglOnlineEagle3Trainer:
             ),
             sharding_strategy=ShardingStrategy.NO_SHARD,
             ignored_modules=[],
-            process_group=dist.group.WORLD,  # get_dp_group(),
+            process_group=get_dp_group(),
         )
 
     def create_optimizer(self):

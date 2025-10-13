@@ -1,17 +1,22 @@
 """
-Simple script to generate responses using local vLLM API from JSONL file.
-Usage:
+Simple script to generate responses using local OpenAI API from JSONL file.
+
 python3 -m sglang.launch_server \
-    --model-path $MODEL_PATH \
+    --model-path openai/gpt-oss-20b \
     --cuda-graph-bs 1 2 4 8 16 32 64 128 256 512 \
     --mem-frac=0.4 \
-    --tp 8 --port 30001 --attention-backend fa3 --reasoning-parser gpt-oss
+    --tp 8 \
+    --host 0.0.0.0 \
+    --port 30001 \
+    --attention-backend fa3 \
+    --reasoning-parser gpt-oss
+
 python scripts/generate_data_by_target.py \
-    --model-name $MODEL_PATH \
-    --raw-data-file $DATASET_PATH/perfectblend.jsonl \
-    --output-dir $SHARE_PREFIX/gpt-oss-120b-generated/perfectblend \
+    --model-name openai/gpt-oss-20b \
+    --raw-data-file ./cache/dataset/sharegpt_train.jsonl \
+    --output-dir ./cache/regenerated_dataset/sharegpt-gpt-oss-20b \
     --max-concurrency 512 \
-    --num-per-shard 50000 \
+    --num-per-shard 20000 \
     --server-address-port 127.0.0.1:30001 \
     --is-reasoning-model \
     --is-gpt-oss
@@ -20,6 +25,7 @@ python scripts/generate_data_by_target.py \
 import argparse
 import asyncio
 import json
+import logging
 import os
 import random
 from dataclasses import dataclass, field
@@ -29,11 +35,16 @@ from datasets import load_dataset
 from openai import AsyncOpenAI, OpenAI, OpenAIError
 from tqdm.asyncio import tqdm
 
+logger = logging.getLogger(__name__)
+
+
 SYSTEM_PROMPT = ""
-# SYSTEM_PROMPT = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """
+    Parse the command line arguments.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-data-file", type=str, required=True)
     parser.add_argument("--output-dir", type=str, required=True)
@@ -54,6 +65,8 @@ def parse_args():
 
 @dataclass
 class RequestFuncObject:
+    """ """
+
     conversation_id: str
     input_conversations: List[Dict[str, str]]
     model_name: str
@@ -69,16 +82,31 @@ class RequestFuncObject:
 
 async def build_conversation(
     req_obj: RequestFuncObject, client: AsyncOpenAI, pbar: Optional[tqdm] = None
-) -> str:
+) -> RequestFuncObject:
+    """
+    Call SGLang to retrieve the response for the input connversations.
+
+    Args:
+        req_obj (RequestFuncObject): The request object for the current conversation, used to store the meta data and conversation history.
+        client (AsyncOpenAI): The client object to use to call the SGLang API to retrieve the response.
+        pbar (Optional[tqdm]): The tqdm progress bar to update.
+
+    Returns:
+        RequestFuncObject: The updated request object
+    """
     messages = []
     if req_obj.system_prompt is not None and len(req_obj.system_prompt) > 0:
+        # add the system prompt if given
         messages.append({"role": "system", "content": req_obj.system_prompt})
+
     req_obj.output_tokens = 0
-    for conversation in req_obj.input_conversations:
-        if conversation["role"] == "assistant":
+    for message in req_obj.input_conversations:
+        if message["role"] == "assistant":
+            # skip, it will be overriden by the generated response
             continue
-        if conversation["role"] == "user":
-            messages.append({"role": "user", "content": conversation["content"]})
+
+        if message["role"] == "user":
+            messages.append({"role": "user", "content": message["content"]})
             try:
                 response = await client.chat.completions.create(
                     model=req_obj.model_name,
@@ -89,11 +117,15 @@ async def build_conversation(
                 )
                 response_text = response.choices[0].message.content
                 req_obj.output_tokens += response.usage.completion_tokens
+
                 if req_obj.is_reasoning_model:
+                    # used for gpt-oss like reasoning models
                     reasoning_content = response.choices[0].message.reasoning_content
             except Exception as e:
                 req_obj.error = str(e)
                 break
+
+            # store the response
             msg = {"role": "assistant", "content": response_text}
             if req_obj.is_reasoning_model:
                 msg["thinking"] = reasoning_content
@@ -110,49 +142,84 @@ async def limited_build_conversation(
     client: AsyncOpenAI,
     semaphore: Optional[asyncio.Semaphore] = None,
     pbar: Optional[tqdm] = None,
-):
+) -> RequestFuncObject:
+    """
+    Asynchronously call the build_conversation function with a semaphore if given.
+
+    Args:
+        req_obj (RequestFuncObject): The request object for the current conversation, used to store the meta data and conversation history.
+        client (AsyncOpenAI): The client object to use to call the SGLang API to retrieve the response.
+        semaphore (Optional[asyncio.Semaphore]): The semaphore to use to limit the number of concurrent requests.
+        pbar (Optional[tqdm]): The tqdm progress bar to update.
+
+    Returns:
+        RequestFuncObject: The updated request object
+    """
     if semaphore is None:
         return await build_conversation(req_obj=req_obj, client=client, pbar=pbar)
     async with semaphore:
         return await build_conversation(req_obj=req_obj, client=client, pbar=pbar)
 
 
-def get_random_temperature() -> float:
-    choices = [0.0, 0.3, 0.5, 0.7, 1.0]
-    weights = [4, 1, 1, 1, 3]
-    return random.choices(choices, weights=weights)[0]
+def get_random_temperature(
+    temperature_choices: List[float] = [0.0, 0.3, 0.5, 0.7, 1.0],
+    temperature_weights: List[int] = [4, 1, 1, 1, 3],
+) -> float:
+    """
+    Get a random temperature for the model generation.
+
+    Args:
+        temperature_choices (List[float]): The list of temperatures to choose from.
+        temperature_weights (List[int]): The list of weights for the temperatures.
+
+    Returns:
+        float: The random temperature
+    """
+    return random.choices(temperature_choices, weights=temperature_weights)[0]
 
 
-def get_random_reasoning_effort() -> str:
-    """Get a random reasoning effort level for the model with weighted probabilities."""
-    # usage example: https://huggingface.co/openai/gpt-oss-20b/discussions/28
-    # Reasoning effort levels with weights: LOW(3), MEDIUM(6), HIGH(1)
-    reasoning_efforts = [
-        "low",
-        "medium",
-        "high",
-    ]
-    weights = [3, 6, 1]
-    return random.choices(reasoning_efforts, weights=weights, k=1)[0]
+def get_random_reasoning_effort(
+    reasoning_efforts: List[str] = ["low", "medium", "high"],
+    reasoning_weights: List[int] = [3, 6, 1],
+) -> str:
+    """
+    Get a random reasoning effort level for the model with weighted probabilities. This is typically only used for gpt-oss like reasoning models.
+
+    Args:
+        reasoning_efforts (List[str]): The list of reasoning efforts to choose from.
+        reasoning_weights (List[int]): The list of weights for the reasoning efforts.
+
+    Returns:
+        str: The random reasoning effort level
+    """
+    return random.choices(reasoning_efforts, weights=reasoning_weights)[0]
 
 
 async def main():
+    # initialize the arguments
     args = parse_args()
     if args.is_gpt_oss:
         args.is_reasoning_model = True
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # load dataset
     total_ds = load_dataset("json", data_files=args.raw_data_file)["train"]
-    # total_ds = total_ds.select(range(10)) # used to debug
+
+    # warmup the server by sending dummy requests
     for start in range(0, len(total_ds), args.num_per_shard):
+        # get the current shard of dataset
         end = min(start + args.num_per_shard, len(total_ds))
         output_file = os.path.join(args.output_dir, f"shard_{start}-{end}.jsonl")
         output_file_error = os.path.join(args.output_dir, f"error_{start}-{end}.jsonl")
         if os.path.exists(output_file):
-            print(f"Skipping generate data {output_file} because it already exists")
+            logger.warning(
+                f"Skipping generate data from {start} to {end} as {output_file} already exists"
+            )
             continue
-        print(f"Generating data {output_file}")
         ds = total_ds.select(range(start, end))
+        logger.info(f"Generating data from {start} to {end}")
+
+        # create clients and warmup the server
         pbar = None if args.disable_tqdm else tqdm(total=len(ds))
         client_semaphore_list = []
         for server_address_port in args.server_address_port:
@@ -177,11 +244,14 @@ async def main():
                     f"Dummy request successful for {server_address_port}: {resp.choices[0].message.content}"
                 )
             except Exception as e:
-                print(f"Warning: Dummy request failed for {server_address_port}: {e}")
+                print(
+                    f"Warning: Dummy request failed for {server_address_port}: {e}, will ignore this server"
+                )
                 continue
             client_semaphore_list.append((client, semaphore))
         assert len(client_semaphore_list) > 0, "No server address port is available"
 
+        # call the llm server asynchronously
         tasks = []
         for i, row in enumerate(ds):
             client, semaphore = client_semaphore_list[i % len(client_semaphore_list)]
@@ -207,6 +277,8 @@ async def main():
                 )
             )
         outputs = await asyncio.gather(*tasks)
+
+        # save the outputs and errors to output_file and output_file_error respectively
         with open(output_file, "w") as f, open(output_file_error, "a") as f_error:
             for output_obj in outputs:
                 output_dict = {
