@@ -186,3 +186,24 @@ TEMPLATE_REGISTRY.register(
         parser_type="openai-harmony",
     ),
 )
+
+
+TEMPLATE_REGISTRY.register(
+    name="olmoe",
+    template=ChatTemplate(
+        assistant_header="<|assistant|>",
+        user_header="<|user|>",
+        system_prompt=None,
+        end_of_turn_token="|||IP_ADDRESS|||",
+    ),
+)
+
+TEMPLATE_REGISTRY.register(
+    name="qwen-moe",
+    template=ChatTemplate(
+        assistant_header="<|im_start|>assistant\n",
+        user_header="<|im_start|>user\n",
+        system_prompt="You are a helpful assistant.",
+        end_of_turn_token="<|im_end|>\n",
+    ),
+)

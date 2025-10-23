@@ -212,11 +212,16 @@ async def main():
                 output_dict = {
                     "conversation_id": output_obj.conversation_id,
                     "conversations": output_obj.output_conversations,
+                    "generation_parameters": {
+                        "temperature": output_obj.temperature,
+                        "max_tokens": output_obj.max_tokens,
+                        "is_reasoning_model": output_obj.is_reasoning_model,
+                        "model_name": output_obj.model_name,
+                        "system_prompt": output_obj.system_prompt,
+                        "extra_body": output_obj.extra_body,
+                    }
                 }
-                if args.is_gpt_oss:
-                    output_dict["reasoning_effort"] = output_obj.extra_body[
-                        "reasoning_effort"
-                    ]
+                
                 if output_obj.error is not None:
                     output_dict["error"] = output_obj.error
                     output_dict["input_conversations"] = output_obj.input_conversations

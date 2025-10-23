@@ -17,12 +17,17 @@ from transformers import (
     Qwen2Config,
     Qwen3Config,
     Qwen3MoeConfig,
+    OlmoeConfig,
+    Qwen3MoeConfig,
     modeling_utils,
 )
 
 from specforge.utils import default_torch_dtype
 
 from .draft.llama3_eagle import LlamaForCausalLMEagle3
+from .draft.olmoe_eagle import OlMoEForCausalLMEagle3
+from .draft.qwen3_moe_eagle import Qwen3MoEForCausalLMEagle3
+from .draft.gpt_oss_eagle import GptOssForCausalLMEagle3
 from .target.gpt_oss import GptOssForCausalLM
 from .target.llama import LlamaForCausalLM
 from .target.llama4 import Llama4ForCausalLM
@@ -36,6 +41,9 @@ class AutoEagle3DraftModel(AutoModelForCausalLMBase):
     # the model mapping is currently hardcoded, we should support lazy model mapping via registry
     _model_mapping = {
         LlamaConfig: LlamaForCausalLMEagle3,
+        GptOssConfig: GptOssForCausalLMEagle3,
+        OlmoeConfig: OlMoEForCausalLMEagle3,
+        Qwen3MoeConfig: Qwen3MoEForCausalLMEagle3,
     }
 
     @classmethod
@@ -142,6 +150,9 @@ class AutoDraftModelConfig:
 
     _config_mapping = {
         "LlamaForCausalLMEagle3": LlamaConfig,
+        "GptOssForCausalLMEagle3": GptOssConfig,
+        "OLMoEForCausalLMEagle3": OlmoeConfig,
+        "Qwen3MoEForCausalLMEagle3": Qwen3MoeConfig,
     }
 
     @classmethod

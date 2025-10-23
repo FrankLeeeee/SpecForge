@@ -776,7 +776,13 @@ class LlamaDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
+        out = self.mlp(hidden_states)
+
+        if isinstance(out, tuple):
+            hidden_states = out[0]
+        else:
+            hidden_states = out
+
         hidden_states = residual + hidden_states
 
         # outputs = (hidden_states, return_hidden)

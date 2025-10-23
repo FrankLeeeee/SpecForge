@@ -80,9 +80,14 @@ class GeneralParser(Parser):
                     break
                 messages.append(sentence)
 
-            conversation = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False, **kwargs
-            )
+            try:
+                conversation = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=False, **kwargs
+                )
+            except Exception as e:
+                print(f"Error applying chat template: {e}")
+                print(messages)
+                raise e
 
         if not self.tokenizer.pad_token_id:
             self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
