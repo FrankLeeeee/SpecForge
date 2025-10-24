@@ -191,11 +191,13 @@ TEMPLATE_REGISTRY.register(
 TEMPLATE_REGISTRY.register(
     name="olmoe",
     template=ChatTemplate(
-        assistant_header="<|assistant|>",
-        user_header="<|user|>",
+        assistant_header="\n<|assistant|>\n",
+        user_header="<|user|>\n",
         system_prompt=None,
         end_of_turn_token="|||IP_ADDRESS|||",
+        parser_type="olmoe",
     ),
+    
 )
 
 TEMPLATE_REGISTRY.register(

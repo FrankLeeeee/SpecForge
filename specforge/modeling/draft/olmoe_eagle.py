@@ -8,7 +8,11 @@ from typing import Optional
 from transformers.cache_utils import Cache
 from specforge.utils import print_with_rank
 
+import torch.nn.functional as F
+import torch.nn as nn
+
 logger = logging.getLogger(__name__)
+
 
 
 class OlMoEForCausalLMEagle3(LlamaForCausalLMEagle3):
@@ -18,5 +22,6 @@ class OlMoEForCausalLMEagle3(LlamaForCausalLMEagle3):
     def __init__(self, config, quant_config=None, attention_backend="sdpa") -> None:
         super().__init__(config, attention_backend=attention_backend)
         self.midlayer.mlp = OlmoeSparseMoeBlock(config)
+
 
 __all__ = ["OlMoEForCausalLMEagle3"]

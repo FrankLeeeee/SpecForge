@@ -41,7 +41,7 @@ except ImportError:
 
 from specforge.utils import padding
 
-from .parse import GeneralParser, HarmonyParser
+from .parse import GeneralParser, HarmonyParser, OLMoEParser
 from .template import TEMPLATE_REGISTRY, ChatTemplate
 
 # define a type called conversation
@@ -143,6 +143,8 @@ def preprocess_conversations(
         parser = GeneralParser(tokenizer, chat_template)
     elif chat_template.parser_type == "openai-harmony":
         parser = HarmonyParser(tokenizer, chat_template)
+    elif chat_template.parser_type == "olmoe":
+        parser = OLMoEParser(tokenizer, chat_template)
     else:
         raise ValueError(f"Invalid parser type: {chat_template.parser_type}")
 

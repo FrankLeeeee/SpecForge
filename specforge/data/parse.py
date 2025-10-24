@@ -111,6 +111,7 @@ class GeneralParser(Parser):
             + re.escape(self.user_message_separator)
             + "|$)"
         )
+
         for match in re.finditer(assistant_pattern, conversation, re.DOTALL):
             # Assistant response text span (excluding assistant_header itself)
             assistant_start_char = match.start(1)
@@ -210,4 +211,98 @@ class HarmonyParser(Parser):
             if char_end <= num_system_chars:
                 continue
             loss_mask[idx] = 1
+        return input_ids, loss_mask
+
+
+class OLMoEParser(GeneralParser):
+
+    def __init__(self, tokenizer: PreTrainedTokenizer, chat_template: ChatTemplate):
+        super().__init__(tokenizer, chat_template)
+        self.system_prompt = chat_template.system_prompt
+        self.user_message_separator = (
+            f"{chat_template.end_of_turn_token}{chat_template.user_header}"
+        )
+        self.assistant_message_separator = (
+            f"{chat_template.assistant_header}"
+        )
+
+    def parse(
+        self,
+        conversation: "Conversation",
+        max_length: int,
+        preformatted: bool = False,
+        **kwargs,
+    ) -> Dict[str, List[torch.Tensor]]:
+        if not preformatted:
+            messages = []
+
+            if conversation[0]["role"] == "system":
+                warnings.warn(
+                    f"The first message is from system, we will use the system prompt from the data and ignore the system prompt from the template"
+                )
+                messages.append(
+                    {"role": "system", "content": conversation[0]["content"]}
+                )
+                conversation = conversation[1:]
+            else:
+                if self.system_prompt:
+                    messages.append({"role": "system", "content": self.system_prompt})
+
+            convroles = ["user", "assistant"]
+            for j, sentence in enumerate(conversation):
+                role = sentence["role"]
+                if role != convroles[j % 2]:
+                    warnings.warn(
+                        f"Conversation truncated due to unexpected role '{role}'. Expected '{convroles[j % 2]}'."
+                    )
+                    break
+                messages.append(sentence)
+
+            try:
+                conversation = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=False, **kwargs
+                )
+            except Exception as e:
+                print(f"Error applying chat template: {e}")
+                print(messages)
+                raise e
+
+        if not self.tokenizer.pad_token_id:
+            self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
+
+        encoding = self.tokenizer(
+            conversation,
+            return_offsets_mapping=True,
+            max_length=max_length,
+            truncation=True,
+            return_tensors="pt",
+            add_special_tokens=False,
+        )
+        input_ids = encoding.input_ids[0]
+        offsets = encoding.offset_mapping[0]
+        loss_mask = torch.zeros(len(input_ids), dtype=torch.long)
+
+        # Find spans of assistant responses using regex
+        # the assistant message ends with |||IP_ADDRESS||| at the end of the sentence
+        # or |||IP_ADDRESS|||\n<|user|>\n
+        assistant_pattern = (
+            re.escape(self.chat_template.assistant_header)
+            + r"(.*?)(?="
+            + re.escape(self.chat_template.end_of_turn_token)
+            + "|$)"
+        )
+
+        for match in re.finditer(assistant_pattern, conversation, re.DOTALL):
+            # Assistant response text span (excluding assistant_header itself)
+            assistant_start_char = match.start(1)
+            assistant_end_char = match.end(1)
+
+            # Mark tokens overlapping with assistant response
+            for idx, (token_start, token_end) in enumerate(offsets):
+                # Token is part of the assistant response span
+                if token_end <= assistant_start_char:
+                    continue  # token before assistant text
+                if token_start > assistant_end_char:
+                    continue  # token after assistant text
+                loss_mask[idx] = 1
         return input_ids, loss_mask
