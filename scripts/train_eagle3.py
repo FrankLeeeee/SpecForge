@@ -60,6 +60,7 @@ def parse_args() -> Tuple[ArgumentParser, Namespace]:
 
     # add model-related arguments
     parser.add_argument("--target-model-path", type=str, required=True)
+    parser.add_argument("--projection-ckpt", type=str, required=False, default=None, help="The checkpoint to the projection layer")
     parser.add_argument(
         "--draft-model-config",
         type=str,
@@ -112,6 +113,13 @@ def parse_args() -> Tuple[ArgumentParser, Namespace]:
         type=int,
         default=7,
         help="The length for Test-Time Training (TTT).",
+    )
+    parser.add_argument(
+        "--ttt-scheduleh",
+        type=str,
+        default="linear",
+        choices=["linear", "constant"],
+        help="The schedule for the Test-Time Training (TTT).",
     )
 
     # data processing type
@@ -358,6 +366,12 @@ def build_draft_model(args: Namespace) -> Tuple[AutoDraftModelConfig, nn.Module]
 
     draft_model.load_embedding(args.target_model_path, embedding_key=args.embedding_key)
     draft_model.freeze_embedding()
+
+    if args.projection_ckpt is not None:
+        project_weights = torch.load(args.projection_ckpt)["module.weight"]
+        draft_model.fc.weight.copy_(project_weights)
+        # set requires_grad to False
+        draft_model.fc.weight.requires_grad = False
     return draft_model_config, draft_model
 
 
@@ -563,9 +577,13 @@ def record_metrcs(
     global_step: int,
     tracker: Tracker,
     optimizer: Optional[Optimizer] = None,
+    length: int = None,
     mode: str = "train",
 ) -> None:
     logdict = {}
+
+    if length is not None:
+        logdict[f"{mode}/ttt-length"] = length
 
     if mode == "train" and optimizer is not None:
         logdict["train/lr"] = optimizer.get_learning_rate()
@@ -573,7 +591,6 @@ def record_metrcs(
     accuracies = torch.stack(accuracies)
     plosses = torch.stack(plosses)
 
-    assert accuracies.shape[0] == args.ttt_length
     dist.all_reduce(accuracies, op=dist.ReduceOp.AVG)
     accuracies = accuracies.cpu().tolist()
     for i in range(len(accuracies)):
@@ -719,6 +736,9 @@ def main():
         for data in progress_bar:
             global_step += 1
 
+            if args.ttt_scheduleh == "linear":
+                eagle3_model.module.length = math.ceil(args.ttt_length * (global_step / args.total_steps))
+
             # ================================================
             # 7.1 Training Step
             # ================================================
@@ -730,7 +750,7 @@ def main():
             # log training metrics
             if global_step % args.log_interval == 0:
                 record_metrcs(
-                    args, acces, plosses, global_step, tracker, optimizer, mode="train"
+                    args, acces, plosses, global_step, tracker, optimizer, eagle3_model.module.length, mode="train"
                 )
 
             if dist.get_rank() == 0:
@@ -755,8 +775,8 @@ def main():
             ):
                 # Run evaluation
                 draft_model.eval()
-                eval_acces = [[] for _ in range(eagle3_model.length)]
-                eval_plosses = [[] for _ in range(eagle3_model.length)]
+                eval_acces = [[] for _ in range(eagle3_model.module.length)]
+                eval_plosses = [[] for _ in range(eagle3_model.module.length)]
 
                 for data in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
                     with torch.no_grad():
@@ -780,6 +800,8 @@ def main():
                     eval_plosses,
                     global_step,
                     tracker,
+                    optimizer=None,
+                    length=eagle3_model.module.length,
                     mode="eval",
                 )
 

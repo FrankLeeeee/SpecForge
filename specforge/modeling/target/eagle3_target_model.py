@@ -125,9 +125,9 @@ class Eagle3TargetModel(ABC):
                 num_layers - 4,
             ]
         self.aux_hidden_states_layers = aux_hidden_states_layers
-        assert (
-            len(self.aux_hidden_states_layers) == 3
-        ), "aux_hidden_states_layers is expected to be 3 layers for EAGLE3"
+        # assert (
+        #     len(self.aux_hidden_states_layers) == 3
+        # ), "aux_hidden_states_layers is expected to be 3 layers for EAGLE3"
 
 
 class HFEagle3TargetModel(Eagle3TargetModel):

@@ -41,7 +41,6 @@ def replaced_logits_processor_forward_for_eagle3(
     This is a modified forward function for the SGLang's logits processor, adapted from https://github.com/sgl-project/sglang/blob/v0.5.4/python/sglang/srt/layers/logits_processor.py.
     The modification is to return the logits and aux hidden states instead of the last hidden states.
     """
-
     if isinstance(logits_metadata, ForwardBatch):
         logits_metadata = LogitsMetadata.from_forward_batch(logits_metadata)
 
