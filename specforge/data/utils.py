@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.distributed as dist
 from datasets import Dataset
-from torch.utils.data import DataLoader, DistributedSampler
+from torchdata.stateful_dataloader import StatefulDataLoader, StatefulDistributedSampler
 
 
 class DataCollatorWithPadding:
@@ -247,14 +247,14 @@ def prepare_dp_dataloaders(
     """
     world_size = dist.get_world_size(process_group)
     rank = dist.get_rank(process_group)
-    sampler = DistributedSampler(
+    sampler = StatefulDistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=shuffle
     )
     if is_vlm:
         datacollator_cls = VlmDataCollatorWithPadding
     else:
         datacollator_cls = DataCollatorWithPadding
-    dataloader = DataLoader(
+    dataloader = StatefulDataLoader(
         dataset,
         batch_size=batch_size,
         sampler=sampler,

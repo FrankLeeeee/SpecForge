@@ -11,6 +11,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from accelerate.utils import set_seed
 from datasets import load_dataset
+from safetensors.torch import load_file
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision, ShardingStrategy, StateDictType
 from torch.optim import Optimizer
@@ -307,37 +308,11 @@ def build_draft_model(args: Namespace) -> Tuple[AutoDraftModelConfig, nn.Module]
         # Use provided config file
         draft_model_config = AutoDraftModelConfig.from_file(args.draft_model_config)
 
-    # Handle base ckpt, config file
-    draft_model_last_checkpoint = None
-    if args.ckpt_dir is not None:
-        if os.path.isdir(args.ckpt_dir):
-            draft_model_config = os.path.join(args.ckpt_dir, "config.json")
-            draft_model_last_checkpoint = args.ckpt_dir
-            print_on_rank0(f"Finetuning from base model: {draft_model_last_checkpoint}")
-        else:
-            raise ValueError(
-                f"Provided base model dir {args.ckpt_dir} is not a valid directory."
-            )
-
-    # detecting last ckpt for draft model
-    if args.resume and os.path.isdir(args.output_dir):
-        print_on_rank0(args.output_dir)
-        draft_model_last_checkpoint = get_last_checkpoint(args.output_dir)
-        print_on_rank0(f"Last checkpoint detected: {draft_model_last_checkpoint}")
-
-    if draft_model_last_checkpoint:
-        draft_model = AutoEagle3DraftModel.from_pretrained(
-            draft_model_last_checkpoint,
-            attention_backend=args.attention_backend,
-            torch_dtype=torch.bfloat16,
-        ).cuda()
-    else:
-        draft_model = AutoEagle3DraftModel.from_config(
-            draft_model_config,
-            attention_backend=args.attention_backend,
-            torch_dtype=torch.bfloat16,
-        ).cuda()
-
+    draft_model = AutoEagle3DraftModel.from_config(
+        draft_model_config,
+        attention_backend=args.attention_backend,
+        torch_dtype=torch.bfloat16,
+    ).cuda()
     draft_model.load_embedding(args.target_model_path, embedding_key=args.embedding_key)
     draft_model.freeze_embedding()
     return draft_model_config, draft_model
@@ -472,6 +447,63 @@ def save_checkpoints(
             )
             print_on_rank0(f"Saved model configuration to {epoch_output_dir}")
         dist.barrier()
+
+
+def load_checkpoints(
+    args: Namespace,
+    eagle3_model: nn.Module,
+    optimizer: Optimizer,
+    train_dataloader: DataLoader,
+) -> None:
+    if args.resume:
+        # resume from the training checkpoint
+        if args.ckpt_dir is not None:
+            # if --ckpt-dir is provided, we directly load its training states
+            if os.path.isdir(args.ckpt_dir):
+                draft_model_last_checkpoint = args.ckpt_dir
+                print_on_rank0(
+                    f"Finetuning from base model: {draft_model_last_checkpoint}"
+                )
+            else:
+                raise ValueError(
+                    f"Provided base model dir {args.ckpt_dir} is not a valid directory."
+                )
+        else:
+            # if --ckpt-dir is not provided, we detect the last checkpoint in the output directory
+            if os.path.exists(args.output_dir):
+                draft_model_last_checkpoint = get_last_checkpoint(args.output_dir)
+                print_on_rank0(
+                    f"Last checkpoint detected: {draft_model_last_checkpoint}"
+                )
+            else:
+                raise ValueError(
+                    f"--resume is provided but the output directory {args.output_dir} does not exist and the script cannot find the last checkpoint"
+                )
+        training_states = torch.load(
+            os.path.join(draft_model_last_checkpoint, "training_state.pt")
+        )
+
+        # load optimizer states
+        optimizer.load_state_dict(training_states["optimizer_state_dict"])
+
+        # load draft model states
+        draft_model_state_dict = load_file(
+            os.path.join(draft_model_last_checkpoint, "model.safetensors")
+        )
+        eagle3_model.load_state_dict(draft_model_state_dict)
+
+        # load dataloader states
+        train_dataloader.load_state_dict(training_states["train_dataloader_state_dict"])
+        train_dataloader.sampler.load_state_dict(
+            training_states["train_distributed_sampler_state_dict"]
+        )
+        print_on_rank0(f"Resumed training from epoch {training_states['epoch'] + 1}")
+
+    elif args.ckpt_dir is not None:
+        # load the model ckpt for finetuning
+        state_dict = load_file(os.path.join(args.ckpt_dir, "model.safetensors"))
+        eagle3_model.load_state_dict(state_dict)
+        print_on_rank0(f"loaded checkpoint from {args.ckpt_dir} for finetuning")
 
 
 def run_forward(
