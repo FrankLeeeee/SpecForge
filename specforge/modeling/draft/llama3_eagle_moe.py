@@ -1,8 +1,13 @@
+import glob
+import json
 import math
+import os
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from huggingface_hub import snapshot_download
+from safetensors import safe_open
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache
@@ -289,7 +294,7 @@ class LlamaExperts(nn.Module):
         self.hidden_size = config.hidden_size
         self.expert_dim = self.intermediate_size
         self.gate_up_proj = nn.Parameter(
-            torch.zeros(self.num_experts, self.hidden_size, 2 * self.expert_dim)
+            torch.empty(self.num_experts, self.hidden_size, 2 * self.expert_dim)
         )
         self.down_proj = nn.Parameter(
             torch.empty((self.num_experts, self.expert_dim, self.hidden_size))
@@ -1189,6 +1194,9 @@ class LlamaForCausalLMEagle3MoE(Eagle3DraftModel):
         self.register_buffer("t2d", t2d)
         self.register_buffer("d2t", d2t)
 
+        # Initialize weights
+        self.apply(self._init_weights)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -1277,3 +1285,169 @@ class LlamaForCausalLMEagle3MoE(Eagle3DraftModel):
             output_attentions=False,
             use_cache=False,
         )
+
+    def _init_weights(self, module):
+        """Initialize the weights of the model following HuggingFace style."""
+        std = (
+            self.config.initializer_range
+            if hasattr(self.config, "initializer_range")
+            else 0.02
+        )
+        if isinstance(module, nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, LlamaRMSNorm):
+            module.weight.data.fill_(1.0)
+        elif isinstance(module, LlamaExperts):
+            module.gate_up_proj.data.normal_(mean=0.0, std=std)
+            module.down_proj.data.normal_(mean=0.0, std=std)
+
+    @torch.no_grad()
+    def load_experts_from_dense_model(
+        self, dense_model_path: str, mlp_key_prefix: str = "midlayer.mlp"
+    ) -> None:
+        """
+        Load expert weights from a dense model checkpoint.
+        The dense model's MLP layer should have the same shape as a single expert.
+
+        Args:
+            dense_model_path (str): Path to the dense model checkpoint. Can be either a Hugging Face
+                repository ID or a local directory path containing the model files.
+            mlp_key_prefix (str): The key prefix for the MLP layer in the dense model state dict.
+                Default is "midlayer.mlp".
+        """
+        print_with_rank(f"Loading expert weights from dense model: {dense_model_path}")
+
+        # Load state dict from dense model
+        state_dict = self._load_state_dict_from_path(dense_model_path)
+
+        # Get MLP weights from dense model
+        gate_proj_key = f"{mlp_key_prefix}.gate_proj.weight"
+        up_proj_key = f"{mlp_key_prefix}.up_proj.weight"
+        down_proj_key = f"{mlp_key_prefix}.down_proj.weight"
+
+        if gate_proj_key not in state_dict:
+            raise KeyError(
+                f"Key {gate_proj_key} not found in dense model. Available keys: {list(state_dict.keys())[:10]}..."
+            )
+        if up_proj_key not in state_dict:
+            raise KeyError(f"Key {up_proj_key} not found in dense model.")
+        if down_proj_key not in state_dict:
+            raise KeyError(f"Key {down_proj_key} not found in dense model.")
+
+        gate_proj_weight = state_dict[gate_proj_key]
+        up_proj_weight = state_dict[up_proj_key]
+        down_proj_weight = state_dict[down_proj_key]
+
+        # Verify shapes match
+        moe_experts = self.midlayer.moe_layer.experts
+        expected_hidden_size = moe_experts.hidden_size
+        expected_intermediate_size = moe_experts.intermediate_size
+
+        if gate_proj_weight.shape != (expected_intermediate_size, expected_hidden_size):
+            raise ValueError(
+                f"Shape mismatch for gate_proj: expected ({expected_intermediate_size}, {expected_hidden_size}), "
+                f"got {gate_proj_weight.shape}"
+            )
+        if up_proj_weight.shape != (expected_intermediate_size, expected_hidden_size):
+            raise ValueError(
+                f"Shape mismatch for up_proj: expected ({expected_intermediate_size}, {expected_hidden_size}), "
+                f"got {up_proj_weight.shape}"
+            )
+        if down_proj_weight.shape != (expected_hidden_size, expected_intermediate_size):
+            raise ValueError(
+                f"Shape mismatch for down_proj: expected ({expected_hidden_size}, {expected_intermediate_size}), "
+                f"got {down_proj_weight.shape}"
+            )
+
+        # Concatenate gate and up projections for MOE format
+        # gate_up_proj shape: (num_experts, hidden_size, 2 * intermediate_size)
+        # We need to transpose gate and up to match the expected format
+        gate_proj_t = gate_proj_weight.t()  # (hidden_size, intermediate_size)
+        up_proj_t = up_proj_weight.t()  # (hidden_size, intermediate_size)
+        gate_up_combined = torch.cat(
+            [gate_proj_t, up_proj_t], dim=-1
+        )  # (hidden_size, 2 * intermediate_size)
+
+        # Initialize all experts with the same weights from dense model
+        num_experts = moe_experts.num_experts
+        for expert_idx in range(num_experts):
+            # Copy gate_up_proj for this expert
+            moe_experts.gate_up_proj.data[expert_idx].copy_(gate_up_combined)
+            # Copy down_proj for this expert (need to transpose to match MOE format)
+            # down_proj in MOE: (num_experts, intermediate_size, hidden_size)
+            # down_proj from dense: (hidden_size, intermediate_size)
+            moe_experts.down_proj.data[expert_idx].copy_(down_proj_weight.t())
+
+        print_with_rank(
+            f"Successfully initialized {num_experts} experts from dense model"
+        )
+
+    def _load_state_dict_from_path(self, model_path: str) -> dict:
+        """
+        Load state dict from a model path (supports both local and HuggingFace paths).
+
+        Args:
+            model_path (str): Path to the model checkpoint.
+
+        Returns:
+            dict: The state dictionary.
+        """
+        if os.path.exists(model_path):
+            # model_path is a local directory
+            # check if there is file ending with index.json
+            glob_path = os.path.join(model_path, "*.index.json")
+            index_json_path = glob.glob(glob_path)
+
+            if len(index_json_path) == 0:
+                # No index.json found, look for single model file
+                safetensors_path = os.path.join(model_path, "model.safetensors")
+                if os.path.exists(safetensors_path):
+                    state_dict = {}
+                    with safe_open(safetensors_path, framework="pt") as f:
+                        for key in f.keys():
+                            state_dict[key] = f.get_tensor(key)
+                    return state_dict
+
+                pytorch_model_path = os.path.join(model_path, "pytorch_model.bin")
+                if os.path.exists(pytorch_model_path):
+                    return torch.load(pytorch_model_path, map_location="cpu")
+
+                raise FileNotFoundError(
+                    f"No index.json, model.safetensors or pytorch_model.bin found in {model_path}"
+                )
+
+            if len(index_json_path) > 1:
+                raise FileNotFoundError(
+                    f"Multiple index.json files found in {model_path}"
+                )
+            index_json_path = index_json_path[0]
+
+            with open(index_json_path, "r") as f:
+                index_json = json.load(f)
+
+            state_dict = {}
+            weight_map = index_json.get("weight_map", {})
+            for key in weight_map.keys():
+                ckpt_file = weight_map[key]
+                ckpt_path = os.path.join(model_path, ckpt_file)
+
+                if ckpt_file.endswith(".safetensors"):
+                    with safe_open(ckpt_path, framework="pt") as f:
+                        state_dict[key] = f.get_tensor(key)
+                else:
+                    file_state_dict = torch.load(ckpt_path, map_location="cpu")
+                    if key in file_state_dict:
+                        state_dict[key] = file_state_dict[key]
+
+            return state_dict
+        else:
+            # this is the case where model_path is a huggingface repository
+            # we first need to locate its local cache
+            local_cache_path = snapshot_download(repo_id=model_path)
+            return self._load_state_dict_from_path(local_cache_path)

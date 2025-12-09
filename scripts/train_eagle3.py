@@ -69,6 +69,13 @@ def parse_args() -> Tuple[ArgumentParser, Namespace]:
         help="Draft model config path. If not provided, will auto-generate from target model.",
     )
     model_group.add_argument(
+        "--dense-model-path",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to dense model checkpoint for initializing MOE experts. If not provided, uses default initialization.",
+    )
+    model_group.add_argument(
         "--embedding-key",
         type=str,
         default="model.embed_tokens.weight",
@@ -364,6 +371,20 @@ def build_draft_model(args: Namespace) -> Tuple[AutoDraftModelConfig, nn.Module]
 
     draft_model.load_embedding(args.target_model_path, embedding_key=args.embedding_key)
     draft_model.freeze_embedding()
+
+    # Load experts from dense model if provided
+    if args.dense_model_path is not None:
+        if hasattr(draft_model, "load_experts_from_dense_model"):
+            print_on_rank0(
+                f"Initializing MOE experts from dense model: {args.dense_model_path}"
+            )
+            draft_model.load_experts_from_dense_model(args.dense_model_path)
+        else:
+            print_on_rank0(
+                f"Warning: dense_model_path provided but model does not support loading from dense model. "
+                f"Ignoring dense_model_path argument."
+            )
+
     return draft_model_config, draft_model
 
 
