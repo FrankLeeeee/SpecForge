@@ -19,6 +19,7 @@ from transformers import (
 )
 
 from .draft.llama3_eagle import LlamaForCausalLMEagle3
+from .draft.llama3_eagle_moe import LlamaForCausalLMEagle3MoE
 from .target.custom_backend import (
     GptOssForCausalLM,
     Llama4ForCausalLM,
@@ -34,6 +35,7 @@ class AutoEagle3DraftModel(AutoModelForCausalLMBase):
     # the model mapping is currently hardcoded, we should support lazy model mapping via registry
     _model_mapping = {
         LlamaConfig: LlamaForCausalLMEagle3,
+        Llama4TextConfig: LlamaForCausalLMEagle3MoE,
     }
 
     @classmethod
@@ -133,6 +135,7 @@ class AutoDraftModelConfig:
 
     _config_mapping = {
         "LlamaForCausalLMEagle3": LlamaConfig,
+        "LlamaForCausalLMEagle3MoE": Llama4TextConfig,
     }
 
     @classmethod

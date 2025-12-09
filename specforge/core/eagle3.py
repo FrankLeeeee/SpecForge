@@ -29,6 +29,7 @@ from transformers.cache_utils import DynamicCache
 
 from specforge.core.loss import LogSoftmaxLoss
 from specforge.modeling.draft import Eagle3DraftModel
+from specforge.modeling.draft.llama3_eagle_moe import load_balancing_loss_func
 from specforge.utils import padding
 
 
@@ -138,7 +139,9 @@ class OnlineEagle3Model(Eagle3Model):
         # Step 5: run TTT
         plosses = []
         vlosses = []
+        alosses = []
         acces = []
+
         if self.attention_backend == "sdpa":
             cache_hidden = [[], []]
             past_key_values = None
@@ -155,7 +158,7 @@ class OnlineEagle3Model(Eagle3Model):
             inputs_embeds = inputs_embeds.to(hidden_states.dtype)
 
             # Step 5.2: run the draft model backbone
-            hidden_states_out = self.draft_model.backbone(
+            hidden_states_out, router_logits = self.draft_model.backbone(
                 input_embeds=inputs_embeds,
                 hidden_states=hidden_states,
                 cache_hidden=cache_hidden,
@@ -186,13 +189,22 @@ class OnlineEagle3Model(Eagle3Model):
             loss = LogSoftmaxLoss.apply(logits, target_p, position_mask)
             plosses.append(loss)
 
+            # for moe
+            moe_aux_loss = load_balancing_loss_func(
+                router_logits,
+                self.draft_model.config.num_local_experts,
+                self.draft_model.config.num_experts_per_tok,
+                attention_mask,
+            )
+            alosses.append(moe_aux_loss)
+
             if not is_last:
                 # Step 5.7: we need to update the loss mask
                 input_ids = padding(input_ids, left=False)
                 position_mask = padding(position_mask, left=False)
                 loss_mask = padding(loss_mask, left=False)
                 # Flex attention mask shirnking is handled inside attention module
-        return plosses, vlosses, acces
+        return plosses, vlosses, alosses, acces
 
 
 class OfflineEagle3Model(OnlineEagle3Model):

@@ -24,7 +24,7 @@ class TestLlamaForCausalLMEagle3Loading(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
 
         config_dict = {
-            "architectures": ["LlamaForCausalLM"],
+            "architectures": ["LlamaForCausalLMEagle3MoE"],
             "bos_token_id": 128000,
             "eos_token_id": 128001,
             "hidden_act": "silu",

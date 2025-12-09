@@ -538,25 +538,33 @@ def run_forward(
                 input_ids, target, loss_mask
             )
 
-        plosses, _, acces = eagle3_model(
+        plosses, _, alosses, acces = eagle3_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             loss_mask=loss_mask,
             target=target,
             hidden_states=hidden_states,
         )
-    return plosses, acces
+    return plosses, alosses, acces
 
 
 def run_backward_and_update(
-    args: Namespace, plosses: List[torch.Tensor], optimizer: Optimizer, global_step: int
+    args: Namespace,
+    plosses: List[torch.Tensor],
+    alosses: List[torch.Tensor],
+    optimizer: Optimizer,
+    global_step: int,
 ) -> None:
     ploss_weight = [0.8**i for i in range(len(plosses))]
     ploss = (
         sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
         / args.draft_accumulation_steps
     )
-    ploss.backward()
+    aloss = (
+        sum([alosses[i] for i in range(len(alosses))]) / args.draft_accumulation_steps
+    )
+    final_loss = ploss + aloss
+    final_loss.backward()
 
     if global_step % args.draft_accumulation_steps == 0:
         optimizer.step()
@@ -753,10 +761,10 @@ def main():
             # ================================================
             # 7.1 Training Step
             # ================================================
-            plosses, acces = run_forward(
+            plosses, alosses, acces = run_forward(
                 args, eagle3_model, data, target_model, is_online
             )
-            run_backward_and_update(args, plosses, optimizer, global_step)
+            run_backward_and_update(args, plosses, alosses, optimizer, global_step)
 
             # log training metrics
             if global_step % args.log_interval == 0:
@@ -791,7 +799,7 @@ def main():
 
                 for data in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
                     with torch.no_grad():
-                        plosses, acces = run_forward(
+                        plosses, alosses, acces = run_forward(
                             args, eagle3_model, data, target_model, is_online
                         )
                         eval_acces = [
