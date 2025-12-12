@@ -6,16 +6,17 @@ export TORCHINDUCTOR_CACHE_DIR=$ROOT_DIR/cache/compiled_kernels
 NUM_GPUS=4
 TP_SIZE=1
 BUILD_DATASET_NUM_PROC=${BUILD_DATASET_NUM_PROC:-64}
+NAME=MoE-4experts-topk1-shared
 
 torchrun \
     --standalone \
     --nproc_per_node $NUM_GPUS \
     $ROOT_DIR/scripts/train_eagle3.py \
     --target-model-path /workdir/huggingface.co/meta-llama/Llama-3.1-8B-Instruct \
-    --draft-model-config $ROOT_DIR/configs/llama3-8B-eagle3-moe.json \
+    --draft-model-config $ROOT_DIR/configs/llama3-8B-eagle3-with-shared-moe-4.json \
     --train-data-path $ROOT_DIR/cache/dataset/sharegpt_train.jsonl \
     --build-dataset-num-proc $BUILD_DATASET_NUM_PROC \
-    --output-dir $ROOT_DIR/outputs/llama3-8b-eagle3-sharegpt \
+    --output-dir $ROOT_DIR/outputs/$NAME \
     --num-epochs 3 \
     --batch-size 1 \
     --tp-size $TP_SIZE \
@@ -28,6 +29,6 @@ torchrun \
     --report-to wandb \
     --sglang-mem-fraction-static 0.5 \
     --wandb-project specforge-moe-ablation-studies \
-    --wandb-name two-experts-topk1
+    --wandb-name $NAME
     # Optional: Initialize MOE experts from a dense model checkpoint
     # --dense-model-path /path/to/dense/model/checkpoint

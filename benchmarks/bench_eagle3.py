@@ -83,8 +83,8 @@ def parse_args():
             "gsm8k:200",
             "humaneval:200",
             "math500:200",
-            "ceval:200",
-            "cmmlu:200",
+            # "ceval:200",
+            # "cmmlu:200",
         ],
         help=f"The list of benchmarks to run. The format is <benchmark-name>:<num-prompts>:<subset>,<subset>. We support the following benchmarks: {', '.join(BENCHMARKS.benchmarks.keys())}",
     )
