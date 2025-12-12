@@ -3,7 +3,7 @@ ROOT_DIR=$(dirname $SCRIPT_DIR)
 export TORCHINDUCTOR_CACHE_DIR=$ROOT_DIR/cache/compiled_kernels
 
 # train eagle3 for llama3.1-8b
-NUM_GPUS=4
+NUM_GPUS=8
 TP_SIZE=1
 BUILD_DATASET_NUM_PROC=${BUILD_DATASET_NUM_PROC:-64}
 NAME=MoE-4experts-topk1-shared
