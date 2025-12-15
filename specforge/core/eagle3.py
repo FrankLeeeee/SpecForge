@@ -158,7 +158,7 @@ class OnlineEagle3Model(Eagle3Model):
             inputs_embeds = inputs_embeds.to(hidden_states.dtype)
 
             # Step 5.2: run the draft model backbone
-            hidden_states_out, router_logits = self.draft_model.backbone(
+            backbone_output = self.draft_model.backbone(
                 input_embeds=inputs_embeds,
                 hidden_states=hidden_states,
                 cache_hidden=cache_hidden,
@@ -167,6 +167,14 @@ class OnlineEagle3Model(Eagle3Model):
                 past_key_values=past_key_values,
                 use_cache=True,
             )
+
+            # Handle both dense and MoE models
+            # Dense models return only hidden_states, MoE models return (hidden_states, router_logits)
+            if isinstance(backbone_output, tuple):
+                hidden_states_out, router_logits = backbone_output
+            else:
+                hidden_states_out = backbone_output
+                router_logits = None
 
             # update hidden states for next step
             hidden_states = hidden_states_out
@@ -190,13 +198,17 @@ class OnlineEagle3Model(Eagle3Model):
             plosses.append(loss)
 
             # for moe
-            moe_aux_loss = load_balancing_loss_func(
-                router_logits,
-                self.draft_model.config.num_local_experts,
-                self.draft_model.config.num_experts_per_tok,
-                attention_mask,
-            )
-            alosses.append(moe_aux_loss)
+            if router_logits is not None:
+                moe_aux_loss = load_balancing_loss_func(
+                    router_logits,
+                    self.draft_model.config.num_local_experts,
+                    self.draft_model.config.num_experts_per_tok,
+                    attention_mask,
+                )
+                alosses.append(moe_aux_loss)
+            else:
+                # For dense models, append zero loss to maintain consistent return shape
+                alosses.append(torch.tensor(0.0, device=hidden_states.device))
 
             if not is_last:
                 # Step 5.7: we need to update the loss mask
