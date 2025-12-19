@@ -140,7 +140,8 @@ class OnlineEagle3Model(Eagle3Model):
         vlosses = []
         acces = []
         if self.attention_backend == "sdpa":
-            cache_hidden = [[], []]
+            num_hidden_layers = getattr(self.draft_model.config, "num_hidden_layers", 1)
+            cache_hidden = [[[], []] for _ in range(num_hidden_layers)]
             past_key_values = None
         elif self.attention_backend == "flex_attention":
             cache_hidden = None
@@ -513,7 +514,8 @@ class QwenVLOnlineEagle3Model(Eagle3Model):
         vlosses = []
         acces = []
         if self.attention_backend == "sdpa":
-            cache_hidden = [[], []]
+            num_hidden_layers = getattr(self.draft_model.config, "num_hidden_layers", 1)
+            cache_hidden = [[[], []] for _ in range(num_hidden_layers)]
             past_key_values = None
         elif self.attention_backend == "flex_attention":
             cache_hidden = None
