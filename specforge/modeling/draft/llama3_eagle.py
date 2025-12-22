@@ -957,6 +957,7 @@ class LlamaDecoderLayer(nn.Module):
         past_key_values: Optional[Cache] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
+        residual: Optional[torch.Tensor] = None,
     ) -> Tuple[
         torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]
     ]:
@@ -973,11 +974,9 @@ class LlamaDecoderLayer(nn.Module):
                 (see `past_key_values`).
             past_key_values (`Cache`, *optional*): cached past key and value projection states
         """
-
-        residual = hidden_states
-
         if self.layer_id == 0:
             # First layer: concatenate embeds with hidden_states
+            residual = hidden_states
             input_emb = self.input_layernorm(input_emb)
             hidden_states = self.hidden_norm(hidden_states)
             hidden_states = torch.cat((input_emb, hidden_states), dim=-1)
@@ -995,16 +994,13 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
         )
-        hidden_states = residual + hidden_states
 
         # Fully Connected
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
 
         # outputs = (hidden_states, return_hidden)
-        return hidden_states
+        return hidden_states, residual
 
 
 class LlamaForCausalLMEagle3(Eagle3DraftModel):
@@ -1093,8 +1089,10 @@ class LlamaForCausalLMEagle3(Eagle3DraftModel):
 
         # fc
         hidden_states = self.fc(hidden_states)
+
+        residual = None
         for layer in self.midlayer:
-            hidden_states = layer(
+            hidden_states, residual = layer(
                 input_emb=inputs_embeds,
                 hidden_states=hidden_states,
                 cache_hidden=cache_hidden[layer.layer_id] if cache_hidden else None,
@@ -1103,10 +1101,11 @@ class LlamaForCausalLMEagle3(Eagle3DraftModel):
                 past_key_values=None,
                 output_attentions=False,
                 use_cache=False,
+                residual=residual,
             )
 
         # norm
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(hidden_states, residual)
 
         return hidden_states
 
@@ -1132,13 +1131,19 @@ class LlamaForCausalLMEagle3(Eagle3DraftModel):
         past_key_values: Optional[Cache] = None,
         use_cache: bool = True,
     ) -> torch.Tensor:
+        residual = None
+
         for layer in self.midlayer:
-            hidden_states = layer(
+            hidden_states, residual = layer(
                 input_emb=input_embeds,
                 hidden_states=hidden_states,
                 cache_hidden=cache_hidden[layer.layer_id] if cache_hidden else None,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 past_key_values=past_key_values,
+                residual=residual,
             )
+
+        hidden_states += residual
+        
         return hidden_states
