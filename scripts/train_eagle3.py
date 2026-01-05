@@ -779,6 +779,10 @@ def main():
                     torch_profiler.stop()
                     torch_profiler.export_chrome_trace(output_path)
 
+            if global_step == 11:
+                torch.cuda.synchronize()
+                e2e_start_time = time.time()
+
             # ================================================
             # 7.1 Training Step
             # ================================================
@@ -858,6 +862,14 @@ def main():
 
             if args.max_num_steps is not None and global_step >= args.max_num_steps:
                 break
+
+            if global_step == 50:
+                torch.cuda.synchronize()
+                e2e_end_time = time.time()
+                print(
+                    f"E2E time: {e2e_end_time - e2e_start_time:.2f}s, avg time per step: {(e2e_end_time - e2e_start_time) / 40:.2f}s"
+                )
+                exit()
 
         if args.max_num_steps is not None and global_step >= args.max_num_steps:
             break

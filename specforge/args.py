@@ -89,6 +89,7 @@ class SGLangBackendArgs:
     sglang_ep_size: int = 1
     sglang_max_running_requests: int = None  # assign based on batch size
     sglang_max_total_tokens: int = None  # assign based on batch size and seq length
+    sglang_quantization: str = None
 
     @staticmethod
     def add_args(parser: argparse.ArgumentParser) -> None:
@@ -161,6 +162,13 @@ class SGLangBackendArgs:
             default=1,
             help="The ep size of the SGLang backend",
         )
+        parser.add_argument(
+            "--sglang-quantization",
+            type=str,
+            default=None,
+            choices=["fp8"],
+            help="The quantization of the SGLang backend",
+        )
 
     @staticmethod
     def from_args(args: argparse.Namespace) -> "SGLangBackendArgs":
@@ -185,6 +193,7 @@ class SGLangBackendArgs:
                 if hasattr(args, "target_batch_size") and hasattr(args, "max_length")
                 else None
             ),
+            sglang_quantization=args.sglang_quantization,
         )
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -203,4 +212,5 @@ class SGLangBackendArgs:
             ep_size=self.sglang_ep_size,
             max_running_requests=self.sglang_max_running_requests,
             max_total_tokens=self.sglang_max_total_tokens,
+            quantization=self.sglang_quantization,
         )
