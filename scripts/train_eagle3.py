@@ -12,6 +12,7 @@ import torch.nn as nn
 from accelerate.utils import set_seed
 from datasets import load_dataset
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.nn.functional import pad
 from torch.distributed.fsdp import MixedPrecision, ShardingStrategy, StateDictType
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
@@ -240,7 +241,6 @@ def build_tracker(args: Namespace, parser: ArgumentParser) -> Tracker:
     tracker = create_tracker(args, args.output_dir)
     return tracker
 
-
 def build_target_model(
     args: Namespace, draft_model_config: AutoDraftModelConfig, is_online: bool = True
 ) -> Tuple[Union[Eagle3TargetModel, TargetHead], Optional[AutoProcessor]]:
@@ -387,11 +387,9 @@ def build_draft_model(args: Namespace) -> Tuple[AutoDraftModelConfig, nn.Module]
 def build_dataloaders(
     args: Namespace,
     draft_model_config: AutoDraftModelConfig,
+    tokenizer: AutoTokenizer,
     processor: Optional[AutoProcessor] = None,
 ) -> Tuple[DataLoader, str, Optional[DataLoader]]:
-    # build dataloaders
-    tokenizer = AutoTokenizer.from_pretrained(args.target_model_path)
-
     # convert to dataloader
     cache_params_string = (
         f"{args.train_data_path}-"
@@ -523,6 +521,7 @@ def save_checkpoints(
 
 def run_forward(
     args: Namespace,
+    tokenizer: AutoTokenizer,
     eagle3_model: nn.Module,
     data: dict,
     target_model: Optional[Eagle3TargetModel] = None,
@@ -538,11 +537,25 @@ def run_forward(
         )
     else:
         if is_online:
+            length = torch.Tensor([data["input_ids"].shape[1]]).cuda().to(torch.int32)
+            handle = dist.all_reduce(length, op=dist.ReduceOp.MAX, group=dist.group.WORLD, async_op=True)
+
             # we generate the eagle3 using the target model in an online fashion
+            input_ids = data["input_ids"].cuda()
+            attention_mask = data["attention_mask"].cuda()
+            loss_mask = data["loss_mask"].cuda()
+            handle.wait()
+
+            # run padding
+            length = length[0].item()
+            input_ids = pad(input_ids, (0, length - input_ids.shape[1]), value=tokenizer.pad_token_id)
+            attention_mask = pad(attention_mask, (0, length - attention_mask.shape[1]), value=0)
+            loss_mask = pad(loss_mask, (0, length - loss_mask.shape[1]), value=0)
+
             eagle3_data = target_model.generate_eagle3_data(
-                input_ids=data["input_ids"].cuda(),
-                attention_mask=data["attention_mask"].cuda(),
-                loss_mask=data["loss_mask"].cuda(),
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                loss_mask=loss_mask,
             )
 
             input_ids = get_dp_data_shard_from_tp(eagle3_data.input_ids)
@@ -659,8 +672,9 @@ def main():
     # ================================================
     # 3. Build dataloader
     # ================================================
+    tokenizer = AutoTokenizer.from_pretrained(args.target_model_path)
     train_dataloader, vocab_mapping_path, eval_dataloader = build_dataloaders(
-        args, draft_model_config, processor
+        args, draft_model_config, tokenizer, processor
     )
 
     # we load the vocab mapping then
@@ -710,7 +724,7 @@ def main():
         sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
         process_group=dist.group.WORLD,  # the draft model should run dp for all processes
     )
-    print_with_rank("Initialized Eagle3 FSDP model")
+    print_with_rank("Initialized Eagle3 DDP model")
 
     # ================================================
     # 5. Build optimizer and scheduler
@@ -771,19 +785,21 @@ def main():
                     )
                     torch_profiler.start()
                 if global_step == args.profile_start_step + args.profile_num_steps + 1:
+                    os.makedirs(args.output_dir, exist_ok=True)
                     output_path = os.path.join(
                         args.output_dir,
                         f"profile_rank{torch.distributed.get_rank()}_{time.time()}.trace.json.gz",
                     )
-                    print(f"End profile {output_path=}")
                     torch_profiler.stop()
                     torch_profiler.export_chrome_trace(output_path)
+                    print(f"End profile {output_path=}")
+                    exit()
 
             # ================================================
             # 7.1 Training Step
             # ================================================
             plosses, acces = run_forward(
-                args, eagle3_model, data, target_model, is_online
+                args, tokenizer, eagle3_model, data, target_model, is_online
             )
             run_backward_and_update(args, plosses, optimizer, global_step)
 
