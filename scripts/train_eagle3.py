@@ -757,27 +757,27 @@ def main():
             # ================================================
             # 7.0 Profiling
             # ================================================
-            if args.profile:
-                # we add the step by 1 to align with global step
-                if global_step == args.profile_start_step + 1:
-                    print("Start profile")
-                    torch_profiler = torch.profiler.profile(
-                        activities=[
-                            torch.profiler.ProfilerActivity.CPU,
-                            torch.profiler.ProfilerActivity.CUDA,
-                        ],
-                        with_stack=True,
-                        record_shapes=args.profile_record_shapes,
-                    )
-                    torch_profiler.start()
-                if global_step == args.profile_start_step + args.profile_num_steps + 1:
-                    output_path = os.path.join(
-                        args.output_dir,
-                        f"profile_rank{torch.distributed.get_rank()}_{time.time()}.trace.json.gz",
-                    )
-                    print(f"End profile {output_path=}")
-                    torch_profiler.stop()
-                    torch_profiler.export_chrome_trace(output_path)
+            # if args.profile:
+            #     # we add the step by 1 to align with global step
+            #     if global_step == args.profile_start_step + 1:
+            #         print("Start profile")
+            #         torch_profiler = torch.profiler.profile(
+            #             activities=[
+            #                 torch.profiler.ProfilerActivity.CPU,
+            #                 torch.profiler.ProfilerActivity.CUDA,
+            #             ],
+            #             with_stack=True,
+            #             record_shapes=args.profile_record_shapes,
+            #         )
+            #         torch_profiler.start()
+            #     if global_step == args.profile_start_step + args.profile_num_steps + 1:
+            #         output_path = os.path.join(
+            #             args.output_dir,
+            #             f"profile_rank{torch.distributed.get_rank()}_{time.time()}.trace.json.gz",
+            #         )
+            #         print(f"End profile {output_path=}")
+            #         torch_profiler.stop()
+            #         torch_profiler.export_chrome_trace(output_path)
 
             if global_step == 11:
                 torch.cuda.synchronize()
@@ -792,76 +792,76 @@ def main():
             run_backward_and_update(args, plosses, optimizer, global_step)
 
             # log training metrics
-            if global_step % (args.log_interval * args.draft_accumulation_steps) == 0:
-                record_metrcs(
-                    args,
-                    acces,
-                    plosses,
-                    global_step // args.draft_accumulation_steps,
-                    tracker,
-                    optimizer,
-                    mode="train",
-                )
+            # if global_step % (args.log_interval * args.draft_accumulation_steps) == 0:
+            #     record_metrcs(
+            #         args,
+            #         acces,
+            #         plosses,
+            #         global_step // args.draft_accumulation_steps,
+            #         tracker,
+            #         optimizer,
+            #         mode="train",
+            #     )
 
-            if dist.get_rank() == 0:
-                time_per_step = time.time() - last_time
-                last_time = time.time()
-                avg_loss = sum(pl for pl in plosses) / len(plosses)
-                avg_acc = sum(acces) / len(acces)
-                progress_bar.set_postfix(
-                    {
-                        "loss": f"{avg_loss:.2f}",
-                        "acc": f"{avg_acc:.2f}",
-                        "time": f"{time_per_step:.2f}s",
-                    }
-                )
+            # if dist.get_rank() == 0:
+            #     time_per_step = time.time() - last_time
+            #     last_time = time.time()
+            #     avg_loss = sum(pl for pl in plosses) / len(plosses)
+            #     avg_acc = sum(acces) / len(acces)
+            #     progress_bar.set_postfix(
+            #         {
+            #             "loss": f"{avg_loss:.2f}",
+            #             "acc": f"{avg_acc:.2f}",
+            #             "time": f"{time_per_step:.2f}s",
+            #         }
+            #     )
 
             # ================================================
             # 7.2 Evaluation Step
             # ================================================
-            if (
-                args.eval_data_path is not None
-                and global_step % args.eval_interval == 0
-            ):
-                # Run evaluation
-                draft_model.eval()
-                eval_acces = [[] for _ in range(eagle3_model.length)]
-                eval_plosses = [[] for _ in range(eagle3_model.length)]
+            # if (
+            #     args.eval_data_path is not None
+            #     and global_step % args.eval_interval == 0
+            # ):
+            #     # Run evaluation
+            #     draft_model.eval()
+            #     eval_acces = [[] for _ in range(eagle3_model.length)]
+            #     eval_plosses = [[] for _ in range(eagle3_model.length)]
 
-                for data in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
-                    with torch.no_grad():
-                        plosses, acces = run_forward(
-                            args, eagle3_model, data, target_model, is_online
-                        )
-                        eval_acces = [
-                            eval_acces[i] + [acces[i]] for i in range(len(acces))
-                        ]
-                        eval_plosses = [
-                            eval_plosses[i] + [plosses[i]] for i in range(len(plosses))
-                        ]
+            #     for data in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
+            #         with torch.no_grad():
+            #             plosses, acces = run_forward(
+            #                 args, eagle3_model, data, target_model, is_online
+            #             )
+            #             eval_acces = [
+            #                 eval_acces[i] + [acces[i]] for i in range(len(acces))
+            #             ]
+            #             eval_plosses = [
+            #                 eval_plosses[i] + [plosses[i]] for i in range(len(plosses))
+            #             ]
 
-                # compute average over all minibatches
-                eval_acces = [torch.stack(acc).mean() for acc in eval_acces]
-                eval_plosses = [torch.stack(pl).mean() for pl in eval_plosses]
+            #     # compute average over all minibatches
+            #     eval_acces = [torch.stack(acc).mean() for acc in eval_acces]
+            #     eval_plosses = [torch.stack(pl).mean() for pl in eval_plosses]
 
-                record_metrcs(
-                    args,
-                    eval_acces,
-                    eval_plosses,
-                    global_step,
-                    tracker,
-                    mode="eval",
-                )
+            #     record_metrcs(
+            #         args,
+            #         eval_acces,
+            #         eval_plosses,
+            #         global_step,
+            #         tracker,
+            #         mode="eval",
+            #     )
 
             # ================================================
             # 7.3 Save Checkpoints
             # ================================================
-            if global_step % args.save_interval == 0:
-                # Save the model
-                save_checkpoints(args, epoch, global_step, eagle3_model, optimizer)
+            # if global_step % args.save_interval == 0:
+            #     # Save the model
+            #     save_checkpoints(args, epoch, global_step, eagle3_model, optimizer)
 
-            if args.max_num_steps is not None and global_step >= args.max_num_steps:
-                break
+            # if args.max_num_steps is not None and global_step >= args.max_num_steps:
+                # break
 
             if global_step == 50:
                 torch.cuda.synchronize()
@@ -871,8 +871,8 @@ def main():
                 )
                 exit()
 
-        if args.max_num_steps is not None and global_step >= args.max_num_steps:
-            break
+        # if args.max_num_steps is not None and global_step >= args.max_num_steps:
+        #     break
 
     # Close the tracker
     tracker.close()
