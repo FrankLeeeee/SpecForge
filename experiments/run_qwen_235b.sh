@@ -10,7 +10,7 @@ torchrun \
     --build-dataset-num-proc 64 \
     --output-dir $ROOT_DIR/outputs/qwen3-235b-a22b-eagle3-e2e \
     --num-epochs 2 \
-    --batch-size 1 \
+    --batch-size 2 \
     --tp-size 8 \
     --learning-rate 1e-4 \
     --max-length 4096 \

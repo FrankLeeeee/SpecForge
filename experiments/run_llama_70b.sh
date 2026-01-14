@@ -10,7 +10,7 @@ torchrun \
     --build-dataset-num-proc 64 \
     --output-dir $ROOT_DIR/outputs/llama3-70b-eagle3-e2e \
     --num-epochs 2 \
-    --batch-size 1 \
+    --batch-size 4 \
     --tp-size 4 \
     --learning-rate 1e-4 \
     --max-length 4096 \
