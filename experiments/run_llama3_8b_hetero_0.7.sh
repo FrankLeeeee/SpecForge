@@ -18,7 +18,7 @@ torchrun \
     --max-length 4096 \
     --chat-template llama3 \
     --cache-dir $ROOT_DIR/cache \
-    --attention-backend sdpa \
+    --attention-backend flex_attention \
     --target-model-backend sglang \
     --log-interval 10 \
     --report-to wandb \
