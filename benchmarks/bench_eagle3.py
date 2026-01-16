@@ -129,8 +129,9 @@ def launch_sglang_server(
 
     sglang_args.extend(
         [
-            "--cuda-graph-max-bs",
-            str(batch_size),
+            # "--cuda-graph-max-bs",
+            # str(batch_size),
+            "--disable-cuda-graph",
             "--mem-fraction-static",
             str(server_args.mem_fraction_static),
             "--tp-size",
