@@ -247,6 +247,18 @@ TEMPLATE_REGISTRY.register(
 )
 
 TEMPLATE_REGISTRY.register(
+    name="kimi-k2.5",
+    template=ChatTemplate(
+        assistant_header="<|im_assistant|>assistant<|im_middle|>",
+        user_header="<|im_start|>user\n",
+        system_prompt="You are a helpful assistant.",
+        end_of_turn_token="<|im_end|>",
+        parser_type="thinking",
+        enable_thinking=True,
+    ),
+)
+
+TEMPLATE_REGISTRY.register(
     name="deepseek-v3",
     template=ChatTemplate(
         assistant_header="<｜Assistant｜>",
