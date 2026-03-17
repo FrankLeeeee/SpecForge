@@ -166,8 +166,15 @@ def wrap_eagle3_logits_processors_in_module(
     """
     This function will wrap the SGLang's original logits processor with the modified one for EAGLE3.
     """
+    names_to_wrap = []
     for name, submodule in module.named_modules():
         if isinstance(submodule, LogitsProcessor):
-            wrapped = LogitsProcessorForEAGLE3(submodule, return_full_logits)
-            setattr(module, name, wrapped)
-            print(f"wrapped {name} with LogitsProcessorForEAGLE3")
+            names_to_wrap.append(name)
+
+    for name in names_to_wrap:
+        parent_name, logits_processor_name = name.rsplit(".", 1)
+        parent_module = module.get_submodule(parent_name)
+        logits_processor = parent_module.get_submodule(logits_processor_name)
+        wrapped_logits_processor = LogitsProcessorForEAGLE3(logits_processor, return_full_logits)
+        setattr(parent_module, logits_processor_name, wrapped_logits_processor)
+        print(f"wrapped {name} with LogitsProcessorForEAGLE3")

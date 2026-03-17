@@ -89,6 +89,8 @@ class SGLangBackendArgs:
     sglang_ep_size: int = 1
     sglang_max_running_requests: int = None  # assign based on batch size
     sglang_max_total_tokens: int = None  # assign based on batch size and seq length
+    sglang_reasoning_parser: str = None
+    sglang_tool_call_parser: str = None
 
     @staticmethod
     def add_args(parser: argparse.ArgumentParser) -> None:
@@ -161,6 +163,18 @@ class SGLangBackendArgs:
             default=1,
             help="The ep size of the SGLang backend",
         )
+        parser.add_argument(
+            "--sglang-reasoning-parser",
+            type=str,
+            default=None,
+            help="The reasoning parser of the SGLang backend",
+        )
+        parser.add_argument(
+            "--sglang-tool-call-parser",
+            type=str,
+            default=None,
+            help="The tool call parser of the SGLang backend",
+        )
 
     @staticmethod
     def from_args(args: argparse.Namespace) -> "SGLangBackendArgs":
@@ -185,6 +199,8 @@ class SGLangBackendArgs:
                 if hasattr(args, "target_batch_size") and hasattr(args, "max_length")
                 else None
             ),
+            sglang_reasoning_parser=args.sglang_reasoning_parser,
+            sglang_tool_call_parser=args.sglang_tool_call_parser,
         )
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -203,4 +219,6 @@ class SGLangBackendArgs:
             ep_size=self.sglang_ep_size,
             max_running_requests=self.sglang_max_running_requests,
             max_total_tokens=self.sglang_max_total_tokens,
+            reasoning_parser=self.sglang_reasoning_parser,
+            tool_call_parser=self.sglang_tool_call_parser,
         )
