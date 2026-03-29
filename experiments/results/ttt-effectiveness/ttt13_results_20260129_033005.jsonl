@@ -1,0 +1,82 @@
+{
+    "mtbench": [
+        {
+            "batch_size": 8,
+            "steps": 9,
+            "topk": 5,
+            "num_draft_tokens": 10,
+            "metrics": [
+                {
+                    "latency": 27.113038839772344,
+                    "output_throughput": 2270.1623511751227,
+                    "accept_length": 4.540163753042709,
+                    "accuracy": null,
+                    "num_questions": 80,
+                    "num_valid_predictions": 0,
+                    "categorical_performance": null
+                }
+            ],
+            "num_samples": null
+        }
+    ],
+    "math500": [
+        {
+            "batch_size": 8,
+            "steps": 9,
+            "topk": 5,
+            "num_draft_tokens": 10,
+            "metrics": [
+                {
+                    "latency": 82.96300977887586,
+                    "output_throughput": 3665.7421278541374,
+                    "accept_length": 6.634402268760907,
+                    "accuracy": 0.392,
+                    "num_questions": 500,
+                    "num_valid_predictions": 500,
+                    "categorical_performance": null
+                }
+            ],
+            "num_samples": null
+        }
+    ],
+    "gsm8k": [
+        {
+            "batch_size": 8,
+            "steps": 9,
+            "topk": 5,
+            "num_draft_tokens": 10,
+            "metrics": [
+                {
+                    "latency": 76.69504989078268,
+                    "output_throughput": 1569.788404485662,
+                    "accept_length": 3.5590339363840604,
+                    "accuracy": 0.7543593631539045,
+                    "num_questions": 1319,
+                    "num_valid_predictions": 1319,
+                    "categorical_performance": null
+                }
+            ],
+            "num_samples": null
+        }
+    ],
+    "humaneval": [
+        {
+            "batch_size": 8,
+            "steps": 9,
+            "topk": 5,
+            "num_draft_tokens": 10,
+            "metrics": [
+                {
+                    "latency": 18.64384235488251,
+                    "output_throughput": 3270.0340862962744,
+                    "accept_length": 6.222925385322037,
+                    "accuracy": 0.0,
+                    "num_questions": 164,
+                    "num_valid_predictions": 164,
+                    "categorical_performance": null
+                }
+            ],
+            "num_samples": null
+        }
+    ]
+}
