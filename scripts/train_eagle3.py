@@ -757,31 +757,31 @@ def main():
             # ================================================
             # 7.0 Profiling
             # ================================================
-            # if args.profile:
-            #     # we add the step by 1 to align with global step
-            #     if global_step == args.profile_start_step + 1:
-            #         print("Start profile")
-            #         torch_profiler = torch.profiler.profile(
-            #             activities=[
-            #                 torch.profiler.ProfilerActivity.CPU,
-            #                 torch.profiler.ProfilerActivity.CUDA,
-            #             ],
-            #             with_stack=True,
-            #             record_shapes=args.profile_record_shapes,
-            #         )
-            #         torch_profiler.start()
-            #     if global_step == args.profile_start_step + args.profile_num_steps + 1:
-            #         output_path = os.path.join(
-            #             args.output_dir,
-            #             f"profile_rank{torch.distributed.get_rank()}_{time.time()}.trace.json.gz",
-            #         )
-            #         print(f"End profile {output_path=}")
-            #         torch_profiler.stop()
-            #         torch_profiler.export_chrome_trace(output_path)
+            if args.profile:
+                # we add the step by 1 to align with global step
+                if global_step == args.profile_start_step + 1:
+                    print("Start profile")
+                    torch_profiler = torch.profiler.profile(
+                        activities=[
+                            torch.profiler.ProfilerActivity.CPU,
+                            torch.profiler.ProfilerActivity.CUDA,
+                        ],
+                        with_stack=True,
+                        record_shapes=args.profile_record_shapes,
+                    )
+                    torch_profiler.start()
+                if global_step == args.profile_start_step + args.profile_num_steps + 1:
+                    output_path = os.path.join(
+                        args.output_dir,
+                        f"profile_rank{torch.distributed.get_rank()}_{time.time()}.trace.json.gz",
+                    )
+                    print(f"End profile {output_path=}")
+                    torch_profiler.stop()
+                    torch_profiler.export_chrome_trace(output_path)
 
-            if global_step == 11:
-                torch.cuda.synchronize()
-                e2e_start_time = time.time()
+            # if global_step == 11:
+            #     torch.cuda.synchronize()
+            #     e2e_start_time = time.time()
 
             # ================================================
             # 7.1 Training Step
@@ -860,19 +860,19 @@ def main():
             #     # Save the model
             #     save_checkpoints(args, epoch, global_step, eagle3_model, optimizer)
 
-            # if args.max_num_steps is not None and global_step >= args.max_num_steps:
-                # break
+            if args.max_num_steps is not None and global_step >= args.max_num_steps:
+                break
 
-            if global_step == 50:
-                torch.cuda.synchronize()
-                e2e_end_time = time.time()
-                print(
-                    f"E2E time: {e2e_end_time - e2e_start_time:.2f}s, avg time per step: {(e2e_end_time - e2e_start_time) / 40:.2f}s"
-                )
-                exit()
+            # if global_step == 50:
+            #     torch.cuda.synchronize()
+            #     e2e_end_time = time.time()
+            #     print(
+            #         f"E2E time: {e2e_end_time - e2e_start_time:.2f}s, avg time per step: {(e2e_end_time - e2e_start_time) / 40:.2f}s"
+            #     )
+            #     exit()
 
-        # if args.max_num_steps is not None and global_step >= args.max_num_steps:
-        #     break
+        if args.max_num_steps is not None and global_step >= args.max_num_steps:
+            break
 
     # Close the tracker
     tracker.close()
