@@ -13,7 +13,7 @@ python3 bench_eagle3.py \
     --mem-fraction-static 0.8 \
     --tp-size 4 \
     --attention-backend fa3 \
-    --config-list 8,0,0,0 8,3,1,4 8,5,1,6 8,7,1,8 \
+    --config-list 8,0,0,0 8,3,1,4 8,5,1,6 \
     --benchmark-list mtbench gsm8k math500 humaneval livecodebench financeqa gpqa \
     --dtype bfloat16 \
     --name qwen3_30b
