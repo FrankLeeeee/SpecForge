@@ -215,7 +215,7 @@ def main():
             else:
                 benchmarker = benchmarkder_cls(num_samples=num_prompts, subset=subset)
             metrics_list = benchmarker.run(
-                host=args.host, port=args.port, batch_size=batch_size
+                host=args.host, port=args.port, batch_size=batch_size, num_runs=5
             )
             send_flush_cache_request(base_url)
             if benchmark_name not in results:
