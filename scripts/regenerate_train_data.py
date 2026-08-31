@@ -169,6 +169,7 @@ def parse_arguments():
         "--server-address",
         type=str,
         nargs="+",
+        required=True,
         help="Server address and port for sglang model server",
     )
     return parser.parse_args()
