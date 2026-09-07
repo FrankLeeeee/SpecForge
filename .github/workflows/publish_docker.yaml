@@ -1,0 +1,151 @@
+name: Publish Docker Image
+
+# Builds docker/Dockerfile.cuda on top of lmsysorg/sglang:<sglang_version>-<cuda_variant>
+# for each CUDA variant and pushes the result to Docker Hub as <namespace>/specforge.
+#
+# Tags pushed for SpecForge version X.Y.Z (read from version.txt):
+#   vX.Y.Z-cu129            CUDA 12.9 image
+#   vX.Y.Z-cu130            CUDA 13.0 image
+#   vX.Y.Z and latest       aliases of the cu130 image
+#
+# Required repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN.
+# Optional repository variable: DOCKERHUB_NAMESPACE (defaults to lmsysorg).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      sglang_version:
+        description: "SGLang image version (lmsysorg/sglang tag prefix)"
+        required: true
+        default: "v0.5.18"
+        type: string
+      cuda_variant:
+        description: "CUDA variant(s) to build"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - cu130
+          - cu129
+      install_flash_attn:
+        description: "Install flash-attn into the image"
+        required: false
+        default: true
+        type: boolean
+      push:
+        description: "Push the images to Docker Hub (untick to only build)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-docker-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SGLANG_VERSION: ${{ github.event.inputs.sglang_version || 'v0.5.18' }}
+  INSTALL_FLASH_ATTN: ${{ github.event.inputs.install_flash_attn == 'false' && '0' || '1' }}
+  PUSH_IMAGE: ${{ github.event_name == 'push' || github.event.inputs.push == 'true' }}
+  IMAGE_NAME: ${{ vars.DOCKERHUB_NAMESPACE || 'lmsysorg' }}/specforge
+
+jobs:
+  plan:
+    name: Select CUDA variants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      variants: ${{ steps.select.outputs.variants }}
+    steps:
+      - name: Select variants
+        id: select
+        env:
+          REQUESTED: ${{ github.event.inputs.cuda_variant || 'all' }}
+        run: |
+          case "${REQUESTED}" in
+            all) variants='["cu129","cu130"]' ;;
+            *)   variants="[\"${REQUESTED}\"]" ;;
+          esac
+          echo "variants=${variants}" >> "$GITHUB_OUTPUT"
+          echo "Building CUDA variants: ${variants}"
+
+  build-and-push:
+    name: Build and push ${{ matrix.cuda_variant }} image
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The SGLang base image alone is 14-18 GB; the default runner does not
+      # have room for it plus the SpecForge layers without this cleanup.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Read SpecForge version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CUDA_VARIANT: ${{ matrix.cuda_variant }}
+        run: |
+          tags="${IMAGE_NAME}:v${VERSION}-${CUDA_VARIANT}"
+          # cu130 is the default variant and also owns the unsuffixed tags.
+          if [ "${CUDA_VARIANT}" = "cu130" ]; then
+            tags="${tags},${IMAGE_NAME}:v${VERSION},${IMAGE_NAME}:latest"
+          fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Image tags: ${tags}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.cuda
+          push: ${{ env.PUSH_IMAGE == 'true' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            SGLANG_VERSION=${{ env.SGLANG_VERSION }}
+            CUDA_VARIANT=${{ matrix.cuda_variant }}
+            INSTALL_FLASH_ATTN=${{ env.INSTALL_FLASH_ATTN }}
+            MAX_JOBS=4
+          labels: |
+            org.opencontainers.image.title=SpecForge
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.base.name=docker.io/lmsysorg/sglang:${{ env.SGLANG_VERSION }}-${{ matrix.cuda_variant }}

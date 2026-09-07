@@ -1,0 +1,84 @@
+# syntax=docker/dockerfile:1
+# SpecForge CUDA image built on top of the official SGLang image.
+#
+# The SGLang tag has the form <SGLANG_VERSION>-<CUDA_VARIANT>, e.g.
+# lmsysorg/sglang:v0.5.18-cu130. See
+# https://hub.docker.com/r/lmsysorg/sglang/tags?name=0.5.18 for the tags
+# published for this SGLang release (cu129, cu130).
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.cuda -t lmsysorg/specforge:v0.5.18-cu130 .
+#   docker build -f docker/Dockerfile.cuda --build-arg CUDA_VARIANT=cu129 -t lmsysorg/specforge:v0.5.18-cu129 .
+#
+# SpecForge is installed into the image's system Python, the same environment
+# that already holds SGLang, so the Mooncake client and the sglang package that
+# the online capture patch modifies are all visible from one interpreter.
+ARG SGLANG_VERSION=v0.5.18
+ARG CUDA_VARIANT=cu130
+FROM lmsysorg/sglang:${SGLANG_VERSION}-${CUDA_VARIANT}
+
+ARG SGLANG_VERSION
+ARG CUDA_VARIANT
+# Pinned to the versions the GPU CI (.github/workflows/test.yaml) installs.
+ARG TORCH_VERSION=2.13.0
+# SGLang 0.5.18 installs flashinfer-cubin separately and requires it to match
+# flashinfer-python; re-pin it after the SpecForge install resolves dependencies.
+ARG FLASHINFER_CUBIN_VERSION=0.6.17
+# flash-attn is optional (the trainer falls back to flex_attention without it)
+# but it is what the `fa` and USP attention backends need. Set to 0 to skip.
+ARG INSTALL_FLASH_ATTN=1
+ARG MAX_JOBS=8
+# Apply patches/sglang/<target>/spec-capture.patch to the installed sglang so
+# the image can also run the online capture server. Set to 0 to skip.
+ARG APPLY_SPEC_CAPTURE_PATCH=1
+ARG SPEC_CAPTURE_PATCH_TARGET=v0.5.18
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    SPECFORGE_HOME=/workspace/SpecForge
+
+WORKDIR ${SPECFORGE_HOME}
+
+# Build tooling for the flash-attn install below.
+RUN python3 -m pip install --upgrade pip wheel setuptools psutil packaging ninja
+
+# Match the CUDA build of torch to the SGLang image variant. This is a no-op
+# when the base image already ships the pinned torch build.
+RUN python3 -m pip install "torch==${TORCH_VERSION}" \
+        --index-url "https://download.pytorch.org/whl/${CUDA_VARIANT}"
+
+RUN if [ "${INSTALL_FLASH_ATTN}" = "1" ]; then \
+        MAX_JOBS="${MAX_JOBS}" python3 -m pip install -v flash-attn --no-build-isolation; \
+    fi
+
+# Copy the source tree (see .dockerignore for what is excluded).
+COPY . ${SPECFORGE_HOME}
+
+RUN python3 -m pip install -v . \
+    && python3 -m pip install "flashinfer-cubin==${FLASHINFER_CUBIN_VERSION}" \
+        --index-url https://flashinfer.ai/whl
+
+# Mooncake client for online disaggregated training. The cu13x images need the
+# cuda13 wheel; everything else uses the default wheel.
+RUN case "${CUDA_VARIANT}" in \
+        cu13*) python3 -m pip install mooncake-transfer-engine-cuda13 ;; \
+        *)     python3 -m pip install mooncake-transfer-engine ;; \
+    esac
+
+# Patch the installed sglang with the spec-capture server flags and sink.
+RUN if [ "${APPLY_SPEC_CAPTURE_PATCH}" = "1" ]; then \
+        bash scripts/apply_sglang_spec_capture_patch.sh --target "${SPEC_CAPTURE_PATCH_TARGET}"; \
+    fi
+
+# Fail the build early if the stack is not installed together. Only importlib
+# metadata is inspected, so this check does not need a GPU on the build host.
+RUN python3 - <<'PY'
+import importlib.util
+from importlib.metadata import version
+for name in ("torch", "sglang", "specforge", "flashinfer-python", "flashinfer-cubin"):
+    print(name, version(name))
+for module in ("specforge", "sglang", "mooncake.store"):
+    assert importlib.util.find_spec(module), f"{module} is missing"
+PY
